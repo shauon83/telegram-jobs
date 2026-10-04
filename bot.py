@@ -7,7 +7,7 @@ import os
 
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import jobs
 import papers
@@ -76,14 +76,14 @@ async def run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"[{name}] failed: {exc}")
 
 
-async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await guard(update):
-        return
-    query = " ".join(context.args).strip()
+async def do_find(update: Update, query: str) -> None:
+    query = query.strip()
     if not query:
-        await update.message.reply_text("Usage: /find <keywords>")
+        await update.message.reply_text('Usage: /find <keywords> 또는 "find <keywords>"')
         return
-    await update.message.reply_text(f'Searching papers for "{query}" ...')
+    # 1) 접수 피드백 (즉시)
+    await update.message.reply_text(f'📥 접수됨: "{query}"\n검색 중... (top 10)')
+    # 2) 검색 후 결과 전달
     try:
         import asyncio
 
@@ -93,6 +93,22 @@ async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:  # noqa: BLE001 - report search errors to owner
         log.exception("find failed: %s", query)
         await update.message.reply_text(f"find failed: {exc}")
+
+
+async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update):
+        return
+    await do_find(update, " ".join(context.args))
+
+
+async def find_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update):
+        return
+    text = (update.message.text or "").strip()
+    if text.lower().startswith("find "):
+        await do_find(update, text[5:])
+    else:
+        await update.message.reply_text('📥 접수됨. "/find <keywords>" 또는 "find <keywords>"로 검색해요.')
 
 
 def main() -> None:
@@ -108,6 +124,7 @@ def main() -> None:
     app.add_handler(CommandHandler("list", list_cmd))
     app.add_handler(CommandHandler("run", run_cmd))
     app.add_handler(CommandHandler("find", find_cmd))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, find_text))
     app.run_polling()
 
 
