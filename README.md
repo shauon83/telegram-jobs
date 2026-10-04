@@ -21,7 +21,12 @@ Telegram에서:
 /start
 /list
 /run ping
+/find graph neural networks
 ```
+
+## 검색
+- `/find <keywords>` — OpenAlex 관련도순 top 10 (2021년 이후) + Scholar 딥링크
+- Scholar 직접 스크래핑은 차단/정책상 제외, 결과별 Scholar 링크로 후속 조회
 
 ## job 추가
 `jobs.py`에 함수 + `REGISTRY["name"] = ("설명", func)` 추가.

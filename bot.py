@@ -10,6 +10,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 import jobs
+import papers
 
 load_dotenv()
 log = logging.getLogger("telegram-jobs")
@@ -37,7 +38,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "telegram-jobs ready.\n"
         "/help — commands\n"
         f"/list — jobs: {names}\n"
-        "/run <name> — run a job"
+        "/run <name> — run a job\n"
+        "/find <keywords> — top 10 related papers"
     )
 
 
@@ -74,6 +76,25 @@ async def run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"[{name}] failed: {exc}")
 
 
+async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update):
+        return
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text("Usage: /find <keywords>")
+        return
+    await update.message.reply_text(f'Searching papers for "{query}" ...')
+    try:
+        import asyncio
+
+        results = await asyncio.to_thread(papers.search, query, 10)
+        for chunk in papers.format_results(query, results):
+            await update.message.reply_text(chunk, disable_web_page_preview=True)
+    except Exception as exc:  # noqa: BLE001 - report search errors to owner
+        log.exception("find failed: %s", query)
+        await update.message.reply_text(f"find failed: {exc}")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -86,6 +107,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("list", list_cmd))
     app.add_handler(CommandHandler("run", run_cmd))
+    app.add_handler(CommandHandler("find", find_cmd))
     app.run_polling()
 
 
