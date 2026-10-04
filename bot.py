@@ -11,6 +11,16 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 import jobs
 import papers
+import websearch
+
+COMMANDS = [
+    ("/start", "봇 상태 + 명령어 안내", "live"),
+    ("/help", "도움말", "live"),
+    ("/list", "명령어 리스트", "live"),
+    ("/run <job>", "등록된 job 실행", "live"),
+    ("/find <검색어>", "Google 웹 검색 top 10", "live"),
+    ("/findresearch <검색어>", "관련 논문 top 10", "live"),
+]
 
 load_dotenv()
 log = logging.getLogger("telegram-jobs")
@@ -33,13 +43,12 @@ async def guard(update: Update) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update):
         return
-    names = ", ".join(sorted(jobs.REGISTRY))
     await update.message.reply_text(
         "telegram-jobs ready.\n"
-        "/help — commands\n"
-        f"/list — jobs: {names}\n"
-        "/run <name> — run a job\n"
-        "/find <keywords> — top 10 related papers"
+        "/list — 명령어 리스트\n"
+        "/find <검색어> — Google 웹 검색 top 10\n"
+        "/findresearch <검색어> — 관련 논문 top 10\n"
+        "/run <job> — 등록된 job 실행"
     )
 
 
@@ -52,8 +61,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update):
         return
-    lines = [f"{name} — {desc}" for name, (desc, _) in sorted(jobs.REGISTRY.items())]
-    await update.message.reply_text("\n".join(lines) or "No jobs registered.")
+    lines = []
+    for cmd, desc, status in COMMANDS:
+        mark = "●" if status == "live" else "○ 개발중"
+        lines.append(f"{mark} {cmd} — {desc}")
+    job_names = ", ".join(sorted(jobs.REGISTRY))
+    lines.append(f"\njobs: {job_names}")
+    await update.message.reply_text("\n".join(lines))
 
 
 async def run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -76,13 +90,13 @@ async def run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"[{name}] failed: {exc}")
 
 
-async def do_find(update: Update, query: str) -> None:
+async def do_findresearch(update: Update, query: str) -> None:
     query = query.strip()
     if not query:
-        await update.message.reply_text('Usage: /find <keywords> 또는 "find <keywords>"')
+        await update.message.reply_text('Usage: /findresearch <keywords> 또는 "findresearch <keywords>"')
         return
     # 1) 접수 피드백 (즉시)
-    await update.message.reply_text(f'📥 접수됨: "{query}"\n검색 중... (top 10)')
+    await update.message.reply_text(f'📥 접수됨: "{query}"\n논문 검색 중... (top 10)')
     # 2) 검색 후 결과 전달
     try:
         import asyncio
@@ -91,8 +105,31 @@ async def do_find(update: Update, query: str) -> None:
         for chunk in papers.format_results(query, results):
             await update.message.reply_text(chunk, disable_web_page_preview=True)
     except Exception as exc:  # noqa: BLE001 - report search errors to owner
+        log.exception("findresearch failed: %s", query)
+        await update.message.reply_text(f"findresearch failed: {exc}")
+
+
+async def do_find(update: Update, query: str) -> None:
+    query = query.strip()
+    if not query:
+        await update.message.reply_text('Usage: /find <검색어> 또는 "find <검색어>"')
+        return
+    await update.message.reply_text(f'📥 접수됨: "{query}"\n웹 검색 중... (top 10)')
+    try:
+        import asyncio
+
+        hits, source = await asyncio.to_thread(websearch.search, query, 10)
+        for chunk in websearch.format_results(query, hits, source):
+            await update.message.reply_text(chunk, disable_web_page_preview=True)
+    except Exception as exc:  # noqa: BLE001 - report search errors to owner
         log.exception("find failed: %s", query)
         await update.message.reply_text(f"find failed: {exc}")
+
+
+async def findresearch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update):
+        return
+    await do_findresearch(update, " ".join(context.args))
 
 
 async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -105,10 +142,13 @@ async def find_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update):
         return
     text = (update.message.text or "").strip()
-    if text.lower().startswith("find "):
+    low = text.lower()
+    if low.startswith("findresearch "):
+        await do_findresearch(update, text[13:])
+    elif low.startswith("find "):
         await do_find(update, text[5:])
     else:
-        await update.message.reply_text('📥 접수됨. "/find <keywords>" 또는 "find <keywords>"로 검색해요.')
+        await update.message.reply_text('📥 접수됨. "/list"로 명령어를 확인해요.')
 
 
 def main() -> None:
@@ -124,6 +164,7 @@ def main() -> None:
     app.add_handler(CommandHandler("list", list_cmd))
     app.add_handler(CommandHandler("run", run_cmd))
     app.add_handler(CommandHandler("find", find_cmd))
+    app.add_handler(CommandHandler("findresearch", findresearch_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, find_text))
     app.run_polling()
 
